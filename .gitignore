@@ -1,0 +1,9 @@
+.DS_Store
+*.log
+.env
+.env.local
+config.local.json
+credentials.json
+keys.txt
+design/
+*.zip

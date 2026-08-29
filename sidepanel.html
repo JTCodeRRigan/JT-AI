@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>JT❥AI</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header>
+  <button id="modelBtn" class="model-btn" data-i18n-title="panel.model" title="Choose model"><span class="ai">AI</span><svg class="chev2" viewBox="0 0 24 24"><path d="M7 6l5 5 5-5M7 13l5 5 5-5"/></svg></button>
+  <div class="spacer"></div>
+  <button id="sessionsBtn" data-i18n-title="panel.sessions" title="Sessions"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>
+  <button id="newChat" data-i18n-title="panel.newChat" title="New chat"><svg viewBox="0 0 24 24" stroke-width="1.9"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button id="trashBtn" data-i18n-title="panel.deleteSession" title="Delete current session"><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/></svg></button>
+  <button id="copyBtn" data-i18n-title="panel.copyChat" title="Copy whole chat"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+  <button id="settings" data-i18n-title="panel.settings" title="Settings"><svg viewBox="0 0 24 24" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
+</header>
+
+<div id="modelMenu" class="menu" hidden></div>
+<div id="sessionsMenu" class="menu" hidden></div>
+
+<div id="captchaBar" hidden>
+  <svg class="ic" viewBox="0 0 24 24"><rect x="7" y="5" width="3.2" height="14" rx="1"/><rect x="13.8" y="5" width="3.2" height="14" rx="1"/></svg>
+  <span id="captchaText" data-i18n="panel.captchaDefault">CAPTCHA detected — agent paused</span>
+  <button id="capContinue" data-i18n-title="panel.continue" title="Continue"><svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></button>
+  <button id="capCancel" data-i18n-title="panel.stopCaptcha" title="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+</div>
+
+<div id="statusBar" hidden><span class="lbl">JT</span><span class="track" id="statusTrack"></span><span class="lbl">AI</span></div>
+
+<main id="chat"></main>
+
+<footer>
+  <div id="attachments"></div>
+  <div class="inputRow">
+    <div class="field">
+      <button id="expand" data-i18n-title="panel.expand" title="Expand input"><svg viewBox="0 0 24 24"><path d="M7 11l5-5 5 5M7 18l5-5 5 5"/></svg></button>
+      <textarea id="input" rows="1" data-i18n-ph="panel.inputPh" data-i18n-title="panel.inputTitle" placeholder="What should I do in the browser?" title="Enter — send, Shift+Enter — new line"></textarea>
+      <button id="attach" data-i18n-title="panel.attach" title="Attach image"><svg viewBox="0 0 24 24" stroke-width="1.7"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+    </div>
+    <button id="send" data-i18n-title="panel.send" title="Send"><svg viewBox="0 0 24 24"><path d="M12 3l8 18-8-4-8 4z"/><path d="M12 3v14"/></svg></button>
+    <button id="stop" data-i18n-title="panel.stop" title="Stop" hidden><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+  </div>
+  <input type="file" id="file" accept="image/*" multiple hidden>
+</footer>
+
+<div id="reportModal" hidden>
+  <div class="rbar"><b data-i18n="panel.report">Report</b><span class="rgrow"></span><button id="reportCopy" data-i18n="panel.copy" data-i18n-title="panel.copy" title="Copy">Copy</button><button id="reportClose" data-i18n-title="panel.close" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="reportBody"></div>
+</div>
+
+<div id="confirm" hidden>
+  <div class="box">
+    <div id="confirmText"></div>
+    <div class="cbtns"><button id="confirmYes" class="danger" data-i18n="panel.delete">Delete</button><button id="confirmNo" class="ghost" data-i18n="panel.cancel">Cancel</button></div>
+  </div>
+</div>
+
+<script type="module" src="sidepanel.js"></script>
+</body>
+</html>

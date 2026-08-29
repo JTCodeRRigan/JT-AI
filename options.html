@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title data-i18n="opt.title">JT❥AI — settings</title>
+<style>
+:root{color-scheme:dark;--bg:#101010;--bar:#1a1a1a;--card:#161616;--border:#2e2e2e;--text:#f2f2f2;--text2:#c9c9c9;--muted:#8f8f8f;--accent:#e5484d;--accent-hover:#f2555a;--accent-bg:rgba(229,72,77,.12);--accent-soft:rgba(229,72,77,.10)}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:820px;margin:0 auto;padding:28px 24px}
+h1{font-size:20px;display:flex;align-items:center;gap:10px}h1 svg{width:24px;height:24px;fill:none;stroke:var(--accent);stroke-width:1.7}
+h2{font-size:15px;margin:0 0 12px}
+.card{background:var(--bar);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
+.row{display:grid;grid-template-columns:180px 1fr;gap:10px 14px;align-items:center;margin:8px 0}
+input,select,textarea{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;box-sizing:border-box}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+button{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:8px 14px;cursor:pointer;margin-right:6px;font:inherit}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.primary:hover{background:var(--accent-hover)}
+.presets button{font-size:12px;padding:6px 10px;margin:3px 3px 3px 0}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:9px;padding:10px 12px;cursor:pointer}
+.item:hover{border-color:var(--muted)}
+.item.active{border-color:var(--accent);background:var(--accent-soft)}
+.muted{color:var(--muted);font-size:12px}
+#status,#gstatus{margin-left:8px;font-size:13px}
+.ok{color:#4cd37a}.bad{color:#ff8a80}
+details{margin-top:8px}summary{cursor:pointer;color:var(--muted)}
+code{background:var(--bg);border:1px solid var(--border);padding:1px 5px;border-radius:4px;font-family:ui-monospace,monospace}
+/* toggle switches (checkbox as a pill) */
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:38px;height:22px;min-width:38px;border-radius:11px;background:var(--border);border:none;position:relative;cursor:pointer;transition:background .15s;flex:0 0 auto}
+input[type=checkbox]::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+input[type=checkbox]:checked{background:var(--accent)}
+input[type=checkbox]:checked::after{transform:translateX(16px);background:#fff}
+label:has(>input[type=checkbox]){display:flex;gap:10px;align-items:flex-start}
+input[type=range]{-webkit-appearance:none;appearance:none;height:6px;background:var(--border);border:none;border-radius:3px;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:none}
+</style></head>
+<body><div class="wrap">
+<h1><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L16 20l-2.5 1-3-7.5L5 18z"/></svg><span data-i18n="opt.title">JT❥AI — settings</span></h1>
+
+<div class="card">
+  <div class="row"><label data-i18n="opt.language">Language</label><select id="g_lang"><option value="en">English</option><option value="ru">Русский</option></select></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0" data-i18n="opt.providers">Models / providers</h2>
+  <div class="list" id="list"></div>
+  <p><button id="add" class="primary" data-i18n="opt.addModel">+ Add model</button></p>
+</div>
+
+<div class="card" id="editor" hidden>
+  <h2 style="margin-top:0" data-i18n="opt.presets">Presets</h2>
+  <div class="presets" id="presets"></div>
+  <div class="row"><label data-i18n="opt.name">Name</label><input id="f_name" data-i18n-ph="opt.namePh" placeholder="e.g. Runpod Qwen"></div>
+  <div class="row"><label data-i18n="opt.protocol">Protocol</label><select id="f_protocol"><option value="openai" data-i18n="opt.protoOpenai">OpenAI-compatible (chat/completions)</option><option value="ollama" data-i18n="opt.protoOllama">Ollama native (/api/chat)</option></select></div>
+  <div class="row"><label data-i18n="opt.baseUrl">Base URL</label><input id="f_baseUrl" placeholder="https://api.deepinfra.com/v1/openai"></div>
+  <div class="row"><label data-i18n="opt.apiKey">API key</label><input id="f_apiKey" type="password" data-i18n-ph="opt.apiKeyPh" placeholder="empty for local"></div>
+  <div class="row"><label data-i18n="opt.model">Model</label><div style="display:flex;gap:6px"><input id="f_model" placeholder="Qwen/Qwen2.5-72B-Instruct" list="models"><datalist id="models"></datalist><button id="listModels" data-i18n-title="opt.listModels" title="Load model list from server">↻</button></div></div>
+  <div class="row"><label data-i18n="opt.toolCall">Tool calling</label><select id="f_toolMode"><option value="native" data-i18n="opt.toolNative">Native function calling (tools)</option><option value="json" data-i18n="opt.toolJson">JSON in text (for models without tools)</option></select></div>
+  <div class="row"><label data-i18n="opt.vision">Vision</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="f_vision"> <span data-i18n="opt.visionLabel">model understands images (screenshots)</span></label></div>
+  <div class="row"><label data-i18n="opt.temperature">Temperature</label><input id="f_temperature" type="number" step="0.1" value="0.2"></div>
+  <div class="row"><label data-i18n="opt.maxTokens">Max tokens</label><input id="f_maxTokens" type="number" value="2048"></div>
+  <div class="row"><label data-i18n="opt.numCtx">num_ctx (Ollama)</label><input id="f_numCtx" type="number" value="16384"></div>
+  <details><summary data-i18n="opt.advanced">Advanced</summary>
+    <div class="row"><label>frequency_penalty</label><input id="f_frequencyPenalty" type="number" step="0.1" placeholder="0.3"></div>
+    <div class="row"><label>presence_penalty</label><input id="f_presencePenalty" type="number" step="0.1" placeholder="0.1"></div>
+    <div class="row"><label>repeat_penalty (Ollama)</label><input id="f_repeatPenalty" type="number" step="0.05" placeholder="1.15"></div>
+    <div class="row"><label data-i18n="opt.extraHeaders">Extra headers</label><textarea id="f_extraHeaders" rows="2" data-i18n-ph="opt.extraHeadersPh" placeholder="X-Custom: value (one per line)"></textarea></div>
+    <div class="row"><label data-i18n="opt.extraBody">Extra body (JSON)</label><textarea id="f_extraBody" rows="2" placeholder='{"top_p": 0.9}'></textarea></div>
+  </details>
+  <p><button id="save" class="primary" data-i18n="opt.save">Save</button><button id="test" data-i18n="opt.test">Test connection</button><button id="delete" data-i18n="opt.delete">Delete</button><span id="status"></span></p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0" data-i18n="opt.agent">Agent</h2>
+  <div class="row"><label data-i18n="opt.scope">Tab scope</label><select id="g_scope"><option value="group" data-i18n="opt.scopeGroup">Tab group of the current tab (if no group — current tab only)</option><option value="window" data-i18n="opt.scopeWindow">All tabs in the window</option><option value="tab" data-i18n="opt.scopeTab">Current tab only</option></select></div>
+  <div class="row"><label data-i18n="opt.trusted">Trusted events</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="g_useDebugger" checked> <span data-i18n="opt.trustedLabel">use Chrome debugger for clicks/keys (more reliable, but shows the “extension started debugging” banner)</span></label></div>
+  <div class="row"><label data-i18n="opt.maxSteps">Max steps per task</label><input id="g_maxSteps" type="number" value="40"></div>
+  <div class="row"><label data-i18n="opt.multiAgent">Multi-agent</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="g_multiAgent"> <span data-i18n="opt.multiAgentLabel">planner builds a plan, supervisor watches the executor and corrects it</span></label></div>
+  <div class="row"><label data-i18n="opt.supervisorModel">Supervisor model</label><select id="g_supervisorProviderId"><option value="" data-i18n="opt.sameAsExecutor">same as executor</option></select></div>
+  <div class="row"><label data-i18n="opt.checkEvery">Check every</label><input id="g_supervisorEvery" type="number" value="4" min="1"> <span class="muted" style="margin-left:6px" data-i18n="opt.stepsSuffix">steps (the supervisor also steps in on errors and loops)</span></div>
+  <div class="row"><label data-i18n="opt.humanPause">Human pause</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="g_humanPause" checked> <span data-i18n="opt.humanPauseLabel">the agent stops and hands control to you on captcha / login / 2FA (pause_for_human tool)</span></label></div>
+  <div class="row"><label data-i18n="opt.autoCaptcha">Auto-detect captcha</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="g_autoCaptcha" checked> <span data-i18n="opt.autoCaptchaLabel">detects reCAPTCHA / hCaptcha / Turnstile itself and pauses without asking the model</span></label></div>
+  <div class="row"><label data-i18n="opt.captchaApi">2Captcha API</label><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="g_use2captcha"> <span data-i18n="opt.captchaApiLabel">solve captchas automatically via 2Captcha</span></label></div>
+  <div class="row"><label data-i18n="opt.captchaKey">2Captcha Key</label><input id="g_2captchaKey" type="password" data-i18n-ph="opt.captchaKeyPh" placeholder="2Captcha API key"></div>
+  <div class="row"><label data-i18n="opt.historyLimit">Sessions to keep (history)</label><div style="display:flex;gap:12px;align-items:center;width:100%"><input id="g_historyLimit" type="range" min="0" max="100" value="20" style="flex:1;padding:0"><span id="g_historyLimitVal" class="muted" style="min-width:64px;text-align:right"></span></div></div>
+  <p><button id="saveGlobal" class="primary" data-i18n="opt.save">Save</button><span id="gstatus"></span></p>
+</div>
+
+<div class="card muted" data-i18n-html="opt.localHelp"></div>
+</div>
+<script type="module" src="options.js"></script></body></html>

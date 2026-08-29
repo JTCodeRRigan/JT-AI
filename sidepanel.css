@@ -1,0 +1,200 @@
+/* Open Agent — UI Kit (red / black / white), ported from the Claude Design system */
+:root{
+  color-scheme: dark;
+  --bg:#101010;            /* app / panel canvas, inputs, secondary buttons */
+  --bar:#1a1a1a;           /* header, footer, pause bar */
+  --card:#161616;          /* tool calls, role cards, empty tile */
+  --bubble:#262626;        /* user message bubble */
+  --border:#2e2e2e;
+  --text:#f2f2f2;
+  --text2:#c9c9c9;
+  --muted:#8f8f8f;
+  --accent:#e5484d;
+  --accent-hover:#f2555a;
+  --accent-bg:rgba(229,72,77,.12);
+  --accent-soft:rgba(229,72,77,.10);
+  --accent-ring:rgba(229,72,77,.25);
+  --success:#4cd37a;
+  --warning:#e0a83c;
+  --err:#ff8a80;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg)}
+[hidden]{display:none!important}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:14px/1.45 var(--font)}
+
+/* header */
+header{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid var(--border);background:var(--bar);align-items:center;position:relative;z-index:60}
+header select{flex:1;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:7px 10px;font:inherit;font-weight:600;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238f8f8f' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;padding-right:28px}
+button{display:flex;align-items:center;justify-content:center;gap:5px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:7px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--accent)}
+button svg{width:17px;height:17px;stroke:var(--muted);fill:none;stroke-width:1.8}
+button:hover svg{stroke:var(--accent)}
+#scopeCount{font-size:12px;color:var(--muted)}
+#scopeBtn.active,#scopeBtn[data-active]{background:var(--accent-bg);border-color:var(--accent)}
+#scopeBtn.active svg,#scopeBtn.active #scopeCount{stroke:var(--accent);color:var(--accent)}
+
+/* scope dropdown */
+#scopePanel{background:var(--bar);border-bottom:1px solid var(--border);padding:6px 8px;font-size:12px;max-height:180px;overflow:auto}
+#scopePanel div{padding:5px 6px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#scopePanel div:hover{background:var(--accent-soft)}
+#scopePanel div.agent{color:var(--accent);background:var(--accent-soft)}
+#scopePanel a{color:var(--accent)}
+
+/* chat */
+main{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:100%;white-space:pre-wrap;word-break:break-word}
+.msg.user{background:var(--bubble);align-self:flex-end;max-width:88%;padding:8px 11px;border-radius:12px}
+.msg.assistant{background:transparent;padding:2px}
+.msg.assistant:empty::after{content:'…';color:var(--muted)}
+.msg.error{color:var(--err);background:rgba(255,138,128,.08);border:1px solid rgba(255,138,128,.25);border-radius:10px;padding:8px 11px;font-size:13px}
+.msg img{max-width:100%;border-radius:10px;display:block;margin-top:4px}
+.reasoning{color:var(--muted);font-size:12px;font-style:italic;white-space:pre-wrap;border-left:2px solid var(--border);padding-left:8px;margin:4px 0}
+
+/* tool calls */
+details.tool{background:var(--card);border:1px solid var(--border);border-radius:10px;font-size:12px;padding:6px 10px}
+details.tool summary{cursor:pointer;color:var(--muted);list-style:none;display:flex;gap:7px;align-items:center;min-width:0}
+details.tool summary::-webkit-details-marker{display:none}
+details.tool summary b{color:var(--text);flex:0 0 auto}
+details.tool summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+details.tool summary::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--success);flex:0 0 auto}
+details.tool.running summary::before{width:8px;height:8px;background:var(--accent);box-shadow:0 0 0 3px var(--accent-ring);animation:blink 1s infinite}
+details.tool.err summary b{color:var(--err)}
+details.tool.err summary::before{background:var(--err)}
+@keyframes blink{50%{opacity:.35}}
+details.tool pre{margin:6px 0 2px;white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;font-size:11px;color:var(--text2);font-family:var(--mono)}
+.msg.assistant code{background:var(--card);padding:1px 4px;border-radius:4px;font-size:12.5px;font-family:var(--mono)}
+.msg.assistant pre{background:var(--card);border:1px solid var(--border);padding:8px;border-radius:10px;overflow:auto}
+.msg.assistant pre code{background:none;padding:0}
+
+/* role cards (planner / supervisor) */
+.msg.role{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:10px;padding:8px 11px;font-size:12.5px}
+.msg.role b{display:flex;align-items:center;gap:6px;color:var(--accent);font-size:11.5px;font-weight:700;margin-bottom:4px}
+.msg.role b svg{width:14px;height:14px;fill:none;stroke:var(--accent);stroke-width:2}
+.msg.role>div{color:var(--text2)}
+.msg.role-planner{border-left-color:#8b93a6}
+.msg.role-planner b{color:#8b93a6}
+.msg.role-planner b svg{stroke:#8b93a6}
+.msg.role-supervisor{border-left-color:var(--warning)}
+.msg.role-supervisor b{color:var(--warning)}
+.msg.role-supervisor b svg{stroke:var(--warning)}
+
+/* empty state */
+.empty{color:var(--muted);text-align:center;margin:auto;font-size:12.5px;padding:24px;max-width:300px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.empty .tile{width:56px;height:56px;border-radius:16px;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+.empty .tile svg{width:28px;height:28px;fill:none;stroke:var(--accent);stroke-width:1.7}
+.empty b{color:var(--text);font-weight:600;font-size:14px}
+
+/* footer / composer */
+footer{border-top:1px solid var(--border);background:var(--bar);padding:8px}
+.inputRow{display:flex;gap:2px;align-items:flex-end}
+.field{position:relative;flex:1;display:flex}
+textarea{flex:1;resize:none;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:11px 46px 11px 40px;font:inherit;line-height:1.42;min-height:46px;height:46px;max-height:200px}
+textarea::placeholder{color:var(--muted)}
+textarea:focus{outline:none;border-color:var(--accent)}
+/* expand button (two chevrons up) — bottom-left, opens a tall composer */
+#expand{position:absolute;left:8px;bottom:8px;width:26px;height:26px;padding:0;border:none;background:transparent;border-radius:8px;display:flex;align-items:center;justify-content:center}
+#expand svg{width:18px;height:18px;stroke:var(--muted);fill:none;stroke-width:2;transition:transform .15s}
+#expand:hover svg{stroke:var(--accent)}
+.field.big #expand svg{transform:rotate(180deg)}
+.field.big textarea{height:360px!important;max-height:360px}
+.inputRow>button{flex:0 0 auto;width:40px;height:40px;padding:0;border:none;background:transparent;border-radius:50%}
+.inputRow>button:hover{border:none}
+#attach{position:absolute;right:6px;bottom:6px;width:32px;height:32px;padding:0;border:none;background:transparent;border-radius:50%;display:flex;align-items:center;justify-content:center}
+#attach svg{width:20px;height:20px;stroke:var(--muted)}
+#attach:hover svg{stroke:var(--accent)}
+#send{background:transparent;border:none;width:34px}
+#send svg{stroke:var(--accent);fill:none;stroke-width:1.4;stroke-linejoin:round;stroke-linecap:round;width:28px;height:28px}
+#send:hover svg{stroke:var(--accent-hover)}
+#stop{width:34px}
+#stop svg{stroke:var(--err);width:20px;height:20px}
+#attachments{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}#attachments img{height:48px;border-radius:8px;border:1px solid var(--border)}
+
+/* header: model button (top-left) + spacer */
+.spacer{flex:1}
+.model-btn{gap:6px;padding:7px 10px;font-weight:700;letter-spacing:.3px}
+.model-btn .ai{color:var(--text);font-size:13px}
+.model-btn .chev2{width:15px;height:15px;stroke:var(--accent);stroke-width:2}
+.model-btn:hover .ai{color:var(--accent)}
+
+/* dropdown menus (model / sessions) */
+.menu{position:absolute;top:48px;z-index:70;background:var(--bar);border:1px solid var(--border);border-radius:12px;padding:6px;max-height:60vh;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:220px}
+.menu[hidden]{display:none}
+#modelMenu{left:8px}
+#sessionsMenu{right:8px;min-width:260px}
+.menu .mi{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden}
+.menu .mi:hover{background:var(--accent-soft)}
+.menu .mi.active{color:var(--accent)}
+.menu .mi .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.menu .mi .sub{color:var(--muted);font-size:11px}
+.menu .empty-menu{color:var(--muted);font-size:12px;padding:10px;text-align:center}
+.menu .mi .iconbtn{padding:4px;border:none;background:transparent;flex:0 0 auto}
+.menu .mi .iconbtn svg{width:15px;height:15px;fill:none;stroke:var(--muted);stroke-width:2}
+.menu .mi .star svg{fill:none}
+.menu .mi .star.on svg{fill:var(--accent);stroke:var(--accent)}
+.menu .mi .iconbtn:hover svg{stroke:var(--accent)}
+
+/* captcha bar (compact, top of chat) */
+#captchaBar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--accent-bg);border-bottom:1px solid var(--border);font-size:12.5px;color:var(--text)}
+#captchaBar[hidden]{display:none}
+#captchaBar .ic{width:16px;height:16px;fill:var(--accent);stroke:none;flex:0 0 auto}
+#captchaBar #captchaText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#captchaBar button{padding:5px;border:1px solid var(--border);background:var(--bg)}
+#captchaBar #capContinue{background:var(--accent);border-color:var(--accent)}
+#captchaBar #capContinue svg{fill:#fff;stroke:none;width:14px;height:14px}
+#captchaBar #capCancel svg{fill:var(--err);stroke:none;width:13px;height:13px}
+
+/* collapsible chat messages */
+.clampable{cursor:pointer}
+.clampable .body{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
+.clampable.msg.assistant .body{-webkit-line-clamp:2}
+.clampable.msg.role .body{-webkit-line-clamp:2}
+.clampable.expanded .body{-webkit-line-clamp:unset;display:block}
+.clampable:not(.expanded) .body::after{content:' …';color:var(--muted)}
+.clampable.expanded .body::after{content:''}
+
+/* confirm dialog */
+#confirm{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px}
+#confirm[hidden]{display:none}
+#confirm .box{background:var(--bar);border:1px solid var(--border);border-radius:14px;padding:18px;max-width:280px;text-align:center}
+#confirm #confirmText{font-size:13.5px;margin-bottom:14px}
+#confirm .cbtns{display:flex;gap:8px}
+#confirm button{flex:1;justify-content:center;padding:9px;border-radius:10px}
+#confirm .danger{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+#confirm .ghost{background:transparent;border-color:var(--border)}
+
+/* working status bar: JT ❥❥❥ …… AI (wave of hearts, shown while the agent works) */
+#statusBar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bar);border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);letter-spacing:.5px}
+#statusBar[hidden]{display:none}
+#statusBar .lbl{font-weight:700;color:var(--text)}
+#statusBar .track{flex:1;display:flex;gap:2px;overflow:hidden;justify-content:flex-start}
+#statusBar .track i{font-style:normal;color:var(--accent);opacity:.13;transition:opacity .12s}
+#statusBar .track i.on{opacity:1}
+
+/* final report: card in chat + full-panel reader */
+.msg.report{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 13px;display:flex;flex-direction:column;gap:10px}
+.msg.report .rhead{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--text)}
+.msg.report .rhead svg{width:18px;height:18px;fill:none;stroke:var(--accent);stroke-width:1.8}
+.msg.report .viewreport{align-self:flex-start;background:var(--accent);color:#fff;border-color:var(--accent);border-radius:10px;padding:8px 14px;font-weight:600}
+.msg.report .viewreport:hover{background:var(--accent-hover)}
+#reportModal{position:fixed;inset:0;z-index:80;background:var(--bg);display:flex;flex-direction:column}
+#reportModal[hidden]{display:none}
+#reportModal .rbar{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bar);border-bottom:1px solid var(--border)}
+#reportModal .rbar b{font-size:14px}
+#reportModal .rbar .rgrow{flex:1}
+#reportModal .rbar button{padding:7px 12px;border-radius:9px;font-size:12.5px}
+#reportModal .rbar #reportClose{padding:7px;width:34px;height:34px}
+#reportModal .rbar #reportClose svg{width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2}
+#reportBody{flex:1;overflow-y:auto;padding:16px;font-size:14px;line-height:1.55;color:var(--text2);white-space:normal;word-break:break-word}
+#reportBody h1{font-size:19px;color:var(--text);margin:14px 0 8px}
+#reportBody h2{font-size:16px;color:var(--text);margin:16px 0 8px;border-bottom:1px solid var(--border);padding-bottom:4px}
+#reportBody h3{font-size:14px;color:var(--text);margin:12px 0 6px}
+#reportBody p{margin:8px 0}
+#reportBody ul,#reportBody ol{margin:8px 0;padding-left:22px}
+#reportBody li{margin:3px 0}
+#reportBody code{background:var(--card);border:1px solid var(--border);padding:1px 5px;border-radius:4px;font-family:var(--mono);font-size:12.5px}
+#reportBody pre{background:var(--card);border:1px solid var(--border);padding:10px;border-radius:10px;overflow:auto}
+#reportBody pre code{background:none;border:none;padding:0}
+#reportBody a{color:var(--accent)}
+#reportBody strong,#reportBody b{color:var(--text)}
