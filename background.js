@@ -203,6 +203,7 @@ function sseParse(buffer, onJson) { const lines = buffer.split('\n'); const rest
 
 // Per-provider learned context window (max_model_len), so we don't repeatedly send an over-limit max_tokens.
 const modelCtx = new Map();
+const noStopParam = new Set(); // providers/models that reject the `stop` parameter (e.g. xAI Grok)
 const ctxKey = (p) => (p.baseUrl || '') + '|' + (p.model || '');
 const OUTPUT_CAP = 4096; // a browser agent step outputs a tool call + short reasoning; small cap leaves room for input
 // Overestimate prompt tokens (chars/2.6 + tool schemas + overhead) so total never exceeds the context.
@@ -228,14 +229,46 @@ function historyCharBudget(provider) {
   return Math.max(16000, Math.floor((limit - OUTPUT_CAP - 3000) * 2.0));
 }
 
+// Convert our OpenAI-style history to Anthropic Messages format: system is top-level, tool calls/results
+// become tool_use / tool_result blocks, and consecutive same-role messages are merged (Anthropic strictly alternates).
+function anthImg(u) { const m = /^data:([^;]+);base64,(.*)$/s.exec(u || ''); return m ? { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } } : { type: 'image', source: { type: 'url', url: u } }; }
+function toAnthropic(messages) {
+  let system = ''; const turns = [];
+  const add = (role, blocks) => { const arr = Array.isArray(blocks) ? blocks : [blocks]; const last = turns[turns.length - 1]; if (last && last.role === role) last.content.push(...arr); else turns.push({ role, content: arr.slice() }); };
+  for (const m of messages) {
+    if (m.role === 'system') { if (typeof m.content === 'string') system += (system ? '\n\n' : '') + m.content; continue; }
+    if (m.role === 'assistant') {
+      const blocks = [];
+      if (m.content) blocks.push({ type: 'text', text: String(m.content) });
+      for (const tc of (m.tool_calls || [])) { let input = safeJson(tc.function.arguments); if (!input || input._raw !== undefined) input = {}; blocks.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input }); }
+      if (!blocks.length) blocks.push({ type: 'text', text: '(no content)' });
+      add('assistant', blocks);
+    } else if (m.role === 'tool') {
+      add('user', { type: 'tool_result', tool_use_id: m.tool_call_id, content: String(m.content ?? '') });
+    } else if (Array.isArray(m.content)) {
+      add('user', m.content.map((p) => (p.type === 'image_url' ? anthImg(p.image_url?.url) : { type: 'text', text: String(p.text || '') })));
+    } else add('user', { type: 'text', text: String(m.content ?? '') });
+  }
+  while (turns.length && turns[0].role !== 'user') turns.shift(); // Anthropic requires the first turn to be user
+  return { system, turns };
+}
+
 async function callModel(provider, messages, tools, signal, onDelta) {
   const isOllama = provider.protocol === 'ollama';
+  const isAnthropic = provider.protocol === 'anthropic';
   const base = provider.baseUrl.replace(/\/+$/, '');
   const headers = { 'Content-Type': 'application/json' };
-  if (provider.apiKey) headers['Authorization'] = 'Bearer ' + provider.apiKey;
+  if (isAnthropic) { if (provider.apiKey) headers['x-api-key'] = provider.apiKey; headers['anthropic-version'] = '2023-06-01'; headers['anthropic-dangerous-direct-browser-access'] = 'true'; }
+  else if (provider.apiKey) headers['Authorization'] = 'Bearer ' + provider.apiKey;
   try { for (const l of (provider.extraHeaders || '').split('\n')) { const i = l.indexOf(':'); if (i > 0) headers[l.slice(0, i).trim()] = l.slice(i + 1).trim(); } } catch {}
   let url, body;
-  if (isOllama) {
+  if (isAnthropic) {
+    url = base + (base.endsWith('/v1') ? '/messages' : '/v1/messages');
+    const { system, turns } = toAnthropic(messages);
+    body = { model: provider.model, max_tokens: clampMaxTokens(provider, messages, tools), messages: turns, stream: true, thinking: { type: 'disabled' } };
+    if (system) body.system = system;
+    if (tools) body.tools = tools.map((t) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }));
+  } else if (isOllama) {
     url = base + '/api/chat';
     const msgs = messages.map((m) => { if (m.role === 'tool') return { role: 'tool', content: m.content }; if (m.role === 'assistant' && m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls.map((tc) => ({ function: { name: tc.function.name, arguments: safeJson(tc.function.arguments) } })) }; if (Array.isArray(m.content)) { const text = m.content.filter((p) => p.type === 'text').map((p) => p.text).join('\n'); const images = m.content.filter((p) => p.type === 'image_url').map((p) => p.image_url.url.split(',')[1]); return { role: m.role, content: text, images }; } return { role: m.role, content: m.content }; });
     body = { model: provider.model, messages: msgs, stream: true, options: { temperature: provider.temperature ?? 0.2, num_ctx: provider.numCtx || 16384 } };
@@ -246,7 +279,7 @@ async function callModel(provider, messages, tools, signal, onDelta) {
     // anti-repetition is OFF by default — penalties hurt structured tool-call generation. Only apply if the user set them.
     if (Number.isFinite(provider.frequencyPenalty)) body.frequency_penalty = provider.frequencyPenalty;
     if (Number.isFinite(provider.presencePenalty)) body.presence_penalty = provider.presencePenalty;
-    body.stop = ['<|im_start|>', '<|im_end|>']; // some endpoints don't set chat-template stops → these leak into output
+    if (!noStopParam.has(ctxKey(provider))) body.stop = ['<|im_start|>', '<|im_end|>']; // some endpoints don't set chat-template stops → these leak into output (but xAI Grok rejects `stop`)
     if (tools) { body.tools = tools; body.tool_choice = 'auto'; }
   }
   if (isOllama && Number.isFinite(provider.repeatPenalty)) { body.options.repeat_penalty = provider.repeatPenalty; }
@@ -254,8 +287,16 @@ async function callModel(provider, messages, tools, signal, onDelta) {
   let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
+    // Anthropic: thinking:{disabled} is rejected on Fable/older models — drop it and retry once.
+    if (isAnthropic && res.status === 400 && body.thinking && /thinking|budget/i.test(txt)) {
+      delete body.thinking; res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    }
+    // xAI Grok (and some others) reject the `stop` parameter — learn it, drop it, retry once.
+    if (res.status === 400 && body.stop && /stop/i.test(txt) && /support|invalid|unknown|unrecogniz|unexpected|argument/i.test(txt)) {
+      noStopParam.add(ctxKey(provider)); delete body.stop; res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    }
     // vLLM/TGI reject when max_tokens exceeds the model context; learn the real limit and retry once with a safe value.
-    const limit = res.status === 400 && !isOllama ? parseContextLimit(txt) : null;
+    const limit = res.status === 400 && !isOllama && !isAnthropic ? parseContextLimit(txt) : null;
     if (limit) {
       modelCtx.set(ctxKey(provider), limit);
       const safe = safeMaxTokens(limit, messages, provider, tools);
@@ -269,6 +310,13 @@ async function callModel(provider, messages, tools, signal, onDelta) {
   const handle = (j) => {
     if (j.error) throw new Error(typeof j.error === 'string' ? j.error : j.error.message || JSON.stringify(j.error));
     if (isOllama) { if (j.message?.content) { content += j.message.content; onDelta(j.message.content); } (j.message?.tool_calls || []).forEach((tc, i) => addTool(toolCalls.length + i, { function: tc.function })); if (j.done) finish = 'stop'; return; }
+    if (isAnthropic) {
+      const ty = j.type;
+      if (ty === 'content_block_start') { const cb = j.content_block || {}; if (cb.type === 'tool_use') addTool(j.index, { id: cb.id, function: { name: cb.name || '' } }); else if (cb.type === 'text' && cb.text) { content += cb.text; onDelta(cb.text); } }
+      else if (ty === 'content_block_delta') { const d = j.delta || {}; if (d.type === 'text_delta' && d.text) { content += d.text; onDelta(d.text); } else if (d.type === 'input_json_delta') addTool(j.index, { function: { arguments: d.partial_json || '' } }); else if (d.type === 'thinking_delta' && d.thinking) onDelta('', d.thinking); }
+      else if (ty === 'message_delta' && j.delta?.stop_reason) finish = j.delta.stop_reason;
+      return;
+    }
     const ch = j.choices?.[0]; if (!ch) return;
     const d = ch.delta || ch.message || {};
     if (d.content) { content += d.content; onDelta(d.content); }
@@ -686,7 +734,9 @@ async function handlePanel(msg, sendResponse) {
     else if (msg.action === 'rebind') { const a = await getAnchorTab(); if (a) await bindPanelToTab(a); sendResponse({ ok: true }); }
     else if (msg.action === 'unbind') { boundGroupId = boundWindowId = boundTabId = null; try { await chrome.storage.session.remove(['boundGroupId', 'boundWindowId', 'boundTabId']); } catch {} sendResponse({ ok: true }); }
     else if (msg.action === 'test_provider') { const p = msg.provider; const r = await callModel(p, [{ role: 'user', content: 'Reply with the single word OK.' }], null, undefined, () => {}); sendResponse({ ok: true, text: r.content }); }
-    else if (msg.action === 'list_models') { const p = msg.provider; const base = p.baseUrl.replace(/\/+$/, ''); const headers = p.apiKey ? { Authorization: 'Bearer ' + p.apiKey } : {}; const url = p.protocol === 'ollama' ? base + '/api/tags' : base + '/models'; const res = await fetch(url, { headers }); if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200)); const j = await res.json(); const models = p.protocol === 'ollama' ? (j.models || []).map((m) => m.name) : (j.data || j.models || []).map((m) => m.id || m.name || m); sendResponse({ ok: true, models }); }
+    else if (msg.action === 'list_models') { const p = msg.provider; const base = p.baseUrl.replace(/\/+$/, ''); let url, headers; if (p.protocol === 'anthropic') { url = base + (base.endsWith('/v1') ? '/models' : '/v1/models'); headers = { 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }; if (p.apiKey) headers['x-api-key'] = p.apiKey; } else { headers = p.apiKey ? { Authorization: 'Bearer ' + p.apiKey } : {}; url = p.protocol === 'ollama' ? base + '/api/tags' : base + '/models'; } const res = await fetch(url, { headers }); if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200)); const j = await res.json(); const models = p.protocol === 'ollama' ? (j.models || []).map((m) => m.name) : (j.data || j.models || []).map((m) => m.id || m.name || m); sendResponse({ ok: true, models }); }
     else sendResponse({ ok: false, error: 'unknown action' });
   } catch (e) { sendResponse({ ok: false, error: e.message || String(e) }); }
 }
+
+

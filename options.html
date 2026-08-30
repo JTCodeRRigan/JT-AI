@@ -52,7 +52,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;heigh
   <h2 style="margin-top:0" data-i18n="opt.presets">Presets</h2>
   <div class="presets" id="presets"></div>
   <div class="row"><label data-i18n="opt.name">Name</label><input id="f_name" data-i18n-ph="opt.namePh" placeholder="e.g. Runpod Qwen"></div>
-  <div class="row"><label data-i18n="opt.protocol">Protocol</label><select id="f_protocol"><option value="openai" data-i18n="opt.protoOpenai">OpenAI-compatible (chat/completions)</option><option value="ollama" data-i18n="opt.protoOllama">Ollama native (/api/chat)</option></select></div>
+  <div class="row"><label data-i18n="opt.protocol">Protocol</label><select id="f_protocol"><option value="openai" data-i18n="opt.protoOpenai">OpenAI-compatible (chat/completions)</option><option value="anthropic" data-i18n="opt.protoAnthropic">Anthropic (Messages API)</option><option value="ollama" data-i18n="opt.protoOllama">Ollama native (/api/chat)</option></select></div>
   <div class="row"><label data-i18n="opt.baseUrl">Base URL</label><input id="f_baseUrl" placeholder="https://api.deepinfra.com/v1/openai"></div>
   <div class="row"><label data-i18n="opt.apiKey">API key</label><input id="f_apiKey" type="password" data-i18n-ph="opt.apiKeyPh" placeholder="empty for local"></div>
   <div class="row"><label data-i18n="opt.model">Model</label><div style="display:flex;gap:6px"><input id="f_model" placeholder="Qwen/Qwen2.5-72B-Instruct" list="models"><datalist id="models"></datalist><button id="listModels" data-i18n-title="opt.listModels" title="Load model list from server">↻</button></div></div>

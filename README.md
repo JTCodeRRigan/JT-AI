@@ -2,7 +2,7 @@
 
 **English** · [Русский](README.ru.md)
 
-A Chrome extension (Manifest V3): **a side-panel chat + an autonomous agent** that works with your tabs on its own — reads pages, clicks with a virtual cursor, types, scrolls, reads **network requests** and the **console**, runs JS. The key difference from tools like "Claude in Chrome" — **any model**: Runpod, Venice, DeepInfra, OpenRouter, OpenAI, and also **local ones** (Ollama, LM Studio, llama.cpp, vLLM).
+A Chrome extension (Manifest V3): **a side-panel chat + an autonomous agent** that works with your tabs on its own — reads pages, clicks with a virtual cursor, types, scrolls, reads **network requests** and the **console**, runs JS. The key difference from tools like "Claude in Chrome" — **any model**: Runpod, Venice, DeepInfra, OpenRouter, OpenAI, **Anthropic (Claude)**, and also **local ones** (Ollama, LM Studio, llama.cpp, vLLM).
 
 <p align="center">
   <img src="docs/hero.png" width="380" alt="Agent panel: plan, tool calls, supervisor, report">
@@ -51,6 +51,7 @@ A Chrome extension (Manifest V3): **a side-panel chat + an autonomous agent** th
 | DeepInfra | `https://api.deepinfra.com/v1/openai` | |
 | OpenRouter | `https://openrouter.ai/api/v1` | |
 | OpenAI | `https://api.openai.com/v1` | vision models supported |
+| Anthropic (Claude) | `https://api.anthropic.com` | key = Anthropic API key; native tools + vision |
 | Ollama (local) | `http://localhost:11434` (native) or `/v1` (OpenAI) | `OLLAMA_ORIGINS="chrome-extension://*" ollama serve` |
 | LM Studio | `http://localhost:1234/v1` | enable Local Server |
 | llama.cpp | `http://localhost:8080/v1` | `llama-server --jinja` (for tools) |

@@ -7,6 +7,7 @@ const PRESETS = [
   { name: 'DeepInfra', protocol: 'openai', baseUrl: 'https://api.deepinfra.com/v1/openai', model: 'Qwen/Qwen2.5-72B-Instruct', toolMode: 'native' },
   { name: 'OpenRouter', protocol: 'openai', baseUrl: 'https://openrouter.ai/api/v1', model: 'qwen/qwen-2.5-72b-instruct', toolMode: 'native' },
   { name: 'OpenAI', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', toolMode: 'native', vision: true },
+  { name: 'Anthropic (Claude)', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-opus-5', toolMode: 'native', vision: true },
   { name: 'Ollama (local)', protocol: 'ollama', baseUrl: 'http://localhost:11434', model: 'qwen2.5:14b', toolMode: 'native' },
   { name: 'Ollama via OpenAI API', protocol: 'openai', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:14b', toolMode: 'native' },
   { name: 'LM Studio (local)', protocol: 'openai', baseUrl: 'http://localhost:1234/v1', model: '', toolMode: 'native' },
