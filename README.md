@@ -1,6 +1,6 @@
 # JT❥AI — a browser AI agent with your own models
 
-**English** · [Русский](README.ru.md)
+**English** · [Русский](README.ru.md) Video: https://www.youtube.com/watch?v=P1Ui4AeCk8Q
 
 A Chrome extension (Manifest V3): **a side-panel chat + an autonomous agent** that works with your tabs on its own — reads pages, clicks with a virtual cursor, types, scrolls, reads **network requests** and the **console**, runs JS. The key difference from tools like "Claude in Chrome" — **any model**: Runpod, Venice, DeepInfra, OpenRouter, OpenAI, **Anthropic (Claude)**, and also **local ones** (Ollama, LM Studio, llama.cpp, vLLM).
 
