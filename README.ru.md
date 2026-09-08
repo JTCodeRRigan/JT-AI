@@ -1,6 +1,6 @@
 # JT❥AI — браузерный ИИ-агент со своими моделями
 
-[English](README.md) · **Русский**
+[English](README.md) · **Русский** Видео: https://www.youtube.com/watch?v=P1Ui4AeCk8Q
 
 Расширение для Chrome (Manifest V3): **чат сбоку + автономный агент**, который сам работает с вкладками — читает страницы, кликает виртуальным курсором, печатает, скроллит, читает **network-запросы** и **console**, выполняет JS. Главное отличие от аналогов вроде «Claude in Chrome» — **любая модель**: Runpod, Venice, DeepInfra, OpenRouter, OpenAI, **Anthropic (Claude)**, а также **локальные** (Ollama, LM Studio, llama.cpp, vLLM).
 
