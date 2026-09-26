@@ -2,6 +2,7 @@ import { t, initI18n, applyI18n } from './i18n.js';
 const $ = (s) => document.querySelector(s);
 const chat = $('#chat'), input = $('#input'), sendBtn = $('#send'), stopBtn = $('#stop');
 let sessionId = 's' + Date.now();
+let resuming = true; // a late 'restore' may only adopt a session while true; any explicit chat action (new/delete/load/send) turns it off
 let port, curAssistant, curOuter, curReasoning, pendingImages = [];
 const toolEls = new Map();
 let providers = [], activeProviderId = null;
@@ -109,7 +110,7 @@ function renderTranscript(tr) {
 }
 
 function onMsg(m) {
-  if (m.type === 'restore') { sessionId = m.sessionId || sessionId; renderTranscript(m.transcript); busy(!!m.running); if (m.paused != null) showCaptcha(m.paused); else hideCaptcha(); }
+  if (m.type === 'restore') { if (resuming || m.sessionId === sessionId) { sessionId = m.sessionId || sessionId; renderTranscript(m.transcript); busy(!!m.running); if (m.paused != null) showCaptcha(m.paused); else hideCaptcha(); } resuming = false; }
   else if (m.type === 'assistant_start') { newAssistant(); }
   else if (m.type === 'delta') { ensureAssistant(); if (m.reasoning) { if (!curReasoning) { curReasoning = document.createElement('div'); curReasoning.className = 'reasoning'; curOuter.before(curReasoning); } curReasoning.textContent += m.reasoning; } if (m.text) { curAssistant._raw = (curAssistant._raw || '') + m.text; curAssistant.textContent = curAssistant._raw; } chat.scrollTop = chat.scrollHeight; }
   else if (m.type === 'assistant_end') { const a = ensureAssistant(); if (m.text) { a.innerHTML = md(m.text); maybeClamp(curOuter); } else if (!a._raw) curOuter.remove(); curAssistant = null; }
@@ -137,13 +138,14 @@ $('#expand').onclick = () => { const big = input.closest('.field').classList.tog
 function send() {
   const text = input.value.trim(); if (!text) return;
   add('user', esc(text) + pendingImages.map((u) => `<img src="${u}">`).join(''));
+  resuming = false;
   port.postMessage({ type: 'send', sessionId, text, images: pendingImages });
   pendingImages = []; $('#attachments').innerHTML = ''; input.value = ''; input.closest('.field').classList.remove('big'); input.style.height = ''; busy(true);
 }
 sendBtn.onclick = send;
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 stopBtn.onclick = () => port.postMessage({ type: 'stop', sessionId });
-$('#newChat').onclick = () => { port.postMessage({ type: 'reset', sessionId }); sessionId = 's' + Date.now(); toolEls.clear(); };
+$('#newChat').onclick = () => { resuming = false; port.postMessage({ type: 'reset', sessionId }); sessionId = 's' + Date.now(); toolEls.clear(); };
 $('#settings').onclick = () => chrome.runtime.openOptionsPage();
 $('#attach').onclick = () => $('#file').click();
 $('#file').onchange = async (e) => { for (const f of e.target.files) { const u = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); }); pendingImages.push(u); const img = document.createElement('img'); img.src = u; $('#attachments').appendChild(img); } e.target.value = ''; };
@@ -169,6 +171,7 @@ function confirmBox(text) {
 // ---- trash: delete current session ----
 $('#trashBtn').onclick = async () => {
   if (!(await confirmBox(t('panel.confirmDeleteSession')))) return;
+  resuming = false;
   port.postMessage({ type: 'session_delete_current', sessionId });
   sessionId = 's' + Date.now(); toolEls.clear();
 };
@@ -221,7 +224,7 @@ function renderSessions(items) {
     : `<div class="empty-menu">${esc(t('panel.historyEmpty'))}</div>`;
   el.querySelectorAll('.mi').forEach((d) => {
     const id = d.dataset.id;
-    d.onclick = () => { sessionId = id; port.postMessage({ type: 'session_load', id }); closeMenus(); }; // click anywhere on the row loads it
+    d.onclick = () => { resuming = false; sessionId = id; port.postMessage({ type: 'session_load', id }); closeMenus(); }; // click anywhere on the row loads it
     d.querySelector('[data-act=pin]').onclick = (e) => { e.stopPropagation(); port.postMessage({ type: 'session_pin', id }); };
     d.querySelector('[data-act=del]').onclick = (e) => { e.stopPropagation(); port.postMessage({ type: 'session_delete', id }); };
   });

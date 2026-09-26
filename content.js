@@ -23,6 +23,7 @@
     return true;
   };
   const inViewport = (el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth; };
+  const scrollableEl = (e) => { const s = getComputedStyle(e); return (['auto', 'scroll'].includes(s.overflowY) || ['auto', 'scroll'].includes(s.overflowX)) && (e.scrollHeight > e.clientHeight || e.scrollWidth > e.clientWidth); };
   const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const labelOf = (el) => {
     const aria = el.getAttribute('aria-label'); if (aria) return clean(aria);
@@ -109,7 +110,7 @@
     return new Promise((r) => setTimeout(r, 380));
   }
   function pulse(x, y) {
-    const p = document.createElement('div');
+    const p = document.createElement('div'); p.className = '__oa_pulse';
     Object.assign(p.style, { position: 'fixed', left: x - 12 + 'px', top: y - 12 + 'px', width: '24px', height: '24px', borderRadius: '50%', border: '2px solid #7c5cff', zIndex: '2147483646', pointerEvents: 'none', animation: '__oa_pulse .5s ease-out forwards' });
     if (!document.getElementById('__oa_style')) { const s = document.createElement('style'); s.id = '__oa_style'; s.textContent = '@keyframes __oa_pulse{from{transform:scale(.4);opacity:1}to{transform:scale(1.8);opacity:0}}'; document.head.appendChild(s); }
     document.body.appendChild(p); setTimeout(() => p.remove(), 600);
@@ -149,8 +150,14 @@
     scroll: async (a) => { const dy = a.direction === 'up' ? -(a.amount || 600) : a.direction === 'down' ? (a.amount || 600) : 0; const dx = a.direction === 'left' ? -(a.amount || 600) : a.direction === 'right' ? (a.amount || 600) : 0; let target = window; if (a.ref) { const { el } = resolveTarget(a); const sc = el.closest?.('[style*="overflow"],[class*="scroll"]') ; target = (el.scrollHeight > el.clientHeight ? el : sc) || window; } if (a.to === 'top') window.scrollTo({ top: 0 }); else if (a.to === 'bottom') window.scrollTo({ top: document.documentElement.scrollHeight }); else target.scrollBy({ top: dy, left: dx, behavior: 'instant' }); await new Promise((r) => setTimeout(r, 300)); return `scrollY=${Math.round(scrollY)} / ${Math.round(document.documentElement.scrollHeight - innerHeight)}`; },
     scroll_to: async (a) => { const { el, x, y } = resolveTarget(a); await moveCursor(x, y); return 'Scrolled into view: ' + labelOf(el).slice(0, 60); },
     key_synthetic: (a) => { const el = document.activeElement || document.body; const key = a.key; const init = { key, code: key, bubbles: true, cancelable: true, ctrlKey: /ctrl/i.test(a.modifiers || ''), metaKey: /cmd|meta/i.test(a.modifiers || ''), shiftKey: /shift/i.test(a.modifiers || ''), altKey: /alt/i.test(a.modifiers || '') }; el.dispatchEvent(new KeyboardEvent('keydown', init)); el.dispatchEvent(new KeyboardEvent('keypress', init)); el.dispatchEvent(new KeyboardEvent('keyup', init)); if (key === 'Enter' && el.form && !el.form.querySelector('button[type=submit],input[type=submit]')) el.form.requestSubmit?.(); else if (key === 'Enter' && el.form) el.form.querySelector('button[type=submit],input[type=submit]')?.click(); return 'Key dispatched (synthetic): ' + key; },
-    viewport: () => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio, scrollY, url: location.href }),
+    viewport: () => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio, scrollX, scrollY, url: location.href }),
     show_cursor: (a) => moveCursor(a.x, a.y).then(() => 'ok'),
+    overlay_hide: () => { const c = document.getElementById('__oa_cursor'); if (c) c.style.display = 'none'; document.querySelectorAll('.__oa_pulse').forEach((p) => (p.style.display = 'none')); return 'ok'; },
+    overlay_show: () => { const c = document.getElementById('__oa_cursor'); if (c) c.style.display = ''; document.querySelectorAll('.__oa_pulse').forEach((p) => (p.style.display = '')); return 'ok'; },
+    rects: (a) => (a.refs || []).map((ref) => { const el = refMap.get(ref); if (!el || !document.contains(el)) return { ref, ok: false }; const r = el.getBoundingClientRect(); return { ref, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; }),
+    scroll_probe: (a) => { let el = document.elementFromPoint(a.x, a.y); while (el && el !== document.body && el !== document.documentElement && !scrollableEl(el)) el = el.parentElement; if (el && el !== document.body && el !== document.documentElement && scrollableEl(el)) return { top: el.scrollTop, left: el.scrollLeft, inner: true }; return { top: scrollY, left: scrollX, inner: false }; },
+    scroll_fallback: (a) => { const o = document.elementFromPoint(a.x, a.y); if (o && o !== document.body && o !== document.documentElement) { let n = o; for (; n && !scrollableEl(n);) n = n.parentElement; if (n && scrollableEl(n)) { n.scrollBy({ left: a.dx, top: a.dy, behavior: 'instant' }); return 'ok'; } } window.scrollBy({ left: a.dx, top: a.dy, behavior: 'instant' }); return 'ok'; },
+    downscale_jpeg: async (a) => { const img = new Image(); img.src = 'data:image/jpeg;base64,' + a.base64; await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; c.getContext('2d').drawImage(img, 0, 0); let q = 0.75, b64 = c.toDataURL('image/jpeg', q).split(',')[1]; const max = a.maxChars || 1398100; while (b64.length > max && q > 0.1) { q -= 0.05; b64 = c.toDataURL('image/jpeg', q).split(',')[1]; } return { base64: b64 }; },
     detect_captcha: () => {
       const bigEnough = (el) => { const r = el.getBoundingClientRect(); return r.width > 90 && r.height > 24 && isVisible(el); };
       const groups = [

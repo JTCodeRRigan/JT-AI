@@ -20,7 +20,7 @@ const FIELDS = ['name', 'protocol', 'baseUrl', 'apiKey', 'model', 'toolMode', 'v
 let providers = [], active = null, editing = null;
 
 async function load() {
-  const s = await chrome.storage.local.get(['providers', 'activeProvider', 'scope', 'useDebugger', 'maxSteps', 'multiAgent', 'supervisorProviderId', 'supervisorEvery', 'autoCaptcha', 'use2captcha', 'captchaKey', 'historyLimit']);
+  const s = await chrome.storage.local.get(['providers', 'activeProvider', 'scope', 'useDebugger', 'maxSteps', 'multiAgent', 'supervisorProviderId', 'supervisorEvery', 'helperProviderId', 'autoCaptcha', 'use2captcha', 'captchaKey', 'historyLimit']);
   providers = s.providers || []; active = s.activeProvider || null;
   $('#g_scope').value = s.scope || 'group'; $('#g_useDebugger').checked = s.useDebugger !== false; $('#g_maxSteps').value = s.maxSteps || 40;
   $('#g_multiAgent').checked = !!s.multiAgent; $('#g_supervisorEvery').value = s.supervisorEvery || 4;
@@ -29,6 +29,7 @@ async function load() {
   $('#g_use2captcha').checked = !!s.use2captcha; $('#g_2captchaKey').value = s.captchaKey || '';
   const sel = $('#g_supervisorProviderId'); sel.innerHTML = `<option value="">${esc(t('opt.sameAsExecutor'))}</option>` + providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.model)} · ${esc(p.model)}</option>`).join('');
   sel.value = s.supervisorProviderId || '';
+  const hsel = $('#g_helperProviderId'); hsel.innerHTML = `<option value="">${esc(t('opt.helperNone'))}</option>` + providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.model)} · ${esc(p.model)}</option>`).join(''); hsel.value = s.helperProviderId || '';
   renderList();
 }
 function renderList() {
@@ -58,7 +59,7 @@ $('#presets').innerHTML = PRESETS.map((p, i) => `<button data-i="${i}">${esc(p.n
 $('#presets').onclick = (e) => { const i = e.target.dataset.i; if (i == null) return; const p = PRESETS[i]; for (const k of Object.keys(p)) { const el = $('#f_' + k); if (el) { if (el.type === 'checkbox') el.checked = !!p[k]; else el.value = p[k]; } } if (!$('#f_vision').checked && !('vision' in p)) $('#f_vision').checked = false; };
 function historyLabel() { const v = +$('#g_historyLimit').value; $('#g_historyLimitVal').textContent = v <= 0 ? t('opt.hLimitNone') : v >= 100 ? t('opt.hLimitInf') : t('opt.hLimitN', v); }
 $('#g_historyLimit').oninput = historyLabel;
-$('#saveGlobal').onclick = async () => { await chrome.storage.local.set({ scope: $('#g_scope').value, useDebugger: $('#g_useDebugger').checked, maxSteps: +$('#g_maxSteps').value || 40, multiAgent: $('#g_multiAgent').checked, supervisorProviderId: $('#g_supervisorProviderId').value || null, supervisorEvery: +$('#g_supervisorEvery').value || 4, autoCaptcha: $('#g_autoCaptcha').checked, use2captcha: $('#g_use2captcha').checked, captchaKey: $('#g_2captchaKey').value, historyLimit: +$('#g_historyLimit').value }); $('#gstatus').innerHTML = `<span class="ok"> ${esc(t('opt.saved'))}</span>`; };
+$('#saveGlobal').onclick = async () => { await chrome.storage.local.set({ scope: $('#g_scope').value, useDebugger: $('#g_useDebugger').checked, maxSteps: +$('#g_maxSteps').value || 40, multiAgent: $('#g_multiAgent').checked, supervisorProviderId: $('#g_supervisorProviderId').value || null, supervisorEvery: +$('#g_supervisorEvery').value || 4, helperProviderId: $('#g_helperProviderId').value || null, autoCaptcha: $('#g_autoCaptcha').checked, use2captcha: $('#g_use2captcha').checked, captchaKey: $('#g_2captchaKey').value, historyLimit: +$('#g_historyLimit').value }); $('#gstatus').innerHTML = `<span class="ok"> ${esc(t('opt.saved'))}</span>`; };
 
 // ---- language ----
 $('#g_lang').onchange = async () => { await setLang($('#g_lang').value); applyI18n(document); renderList(); load(); historyLabel(); };

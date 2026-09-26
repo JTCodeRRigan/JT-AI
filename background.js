@@ -1,6 +1,7 @@
 // Service worker: provider calls (OpenAI-compatible / Ollama native), agent loop, tools, network/console logs.
 import { TOOLS, SYSTEM_PROMPT, jsonToolPrompt } from './tools.js';
 import { t, initI18n, useLang } from './i18n.js';
+import { send as dbg, attach, detach, detachAll, trustedClick, trustedKey, typeText, clearField, fitToBudget, IMG_BUDGET, setDialogLogger } from './cdp.js';
 initI18n();
 
 // Chrome opens the panel on icon click (reliable, no user-gesture/SW-wake race). We bind to the launch tab's group
@@ -15,7 +16,21 @@ const netLogs = new Map();   // tabId -> array
 const consoleLogs = new Map();
 const push = (map, tabId, item) => { let a = map.get(tabId); if (!a) { a = []; map.set(tabId, a); } a.push(item); if (a.length > MAX_LOG) a.splice(0, a.length - MAX_LOG); };
 
+// ---------------- keepalive (offscreen document keeps the SW alive during long calls / human pauses) ----------------
+let offscreenReady = null;
+async function ensureOffscreen() {
+  if (!chrome.offscreen) return;
+  if (offscreenReady) return offscreenReady;
+  offscreenReady = (async () => {
+    try { if (await chrome.offscreen.hasDocument()) return; await chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['BLOBS'], justification: 'Keep the service worker alive during long model calls and human pauses so agent state is not lost.' }); } catch {}
+  })().finally(() => { offscreenReady = null; });
+  return offscreenReady;
+}
+chrome.runtime.onStartup?.addListener(ensureOffscreen);
+chrome.runtime.onInstalled?.addListener(ensureOffscreen);
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'keepalive') return; // receiving the message is enough to reset the SW idle timer
   if (msg?.type === 'relay' && sender.tab) {
     const tabId = sender.tab.id;
     if (msg.kind === 'net') {
@@ -39,9 +54,9 @@ chrome.tabs.onRemoved.addListener((id) => { netLogs.delete(id); consoleLogs.dele
 
 // ---------------- settings ----------------
 async function getSettings() {
-  const s = await chrome.storage.local.get(['providers', 'activeProvider', 'useDebugger', 'maxSteps', 'scope', 'multiAgent', 'supervisorProviderId', 'supervisorEvery', 'autoCaptcha', 'use2captcha', 'captchaKey', 'historyLimit', 'lang']);
+  const s = await chrome.storage.local.get(['providers', 'activeProvider', 'useDebugger', 'maxSteps', 'scope', 'multiAgent', 'supervisorProviderId', 'supervisorEvery', 'helperProviderId', 'autoCaptcha', 'use2captcha', 'captchaKey', 'historyLimit', 'lang']);
   if (s.lang) useLang(s.lang);
-  return { providers: s.providers || [], activeProvider: s.activeProvider || null, useDebugger: s.useDebugger !== false, maxSteps: s.maxSteps || 40, scope: s.scope || 'group', multiAgent: !!s.multiAgent, supervisorProviderId: s.supervisorProviderId || null, supervisorEvery: s.supervisorEvery || 4, autoCaptcha: s.autoCaptcha !== false, use2captcha: !!s.use2captcha, captchaKey: s.captchaKey || '', historyLimit: s.historyLimit == null ? 20 : s.historyLimit, lang: s.lang || null };
+  return { providers: s.providers || [], activeProvider: s.activeProvider || null, useDebugger: s.useDebugger !== false, maxSteps: s.maxSteps || 40, scope: s.scope || 'group', multiAgent: !!s.multiAgent, supervisorProviderId: s.supervisorProviderId || null, supervisorEvery: s.supervisorEvery || 4, helperProviderId: s.helperProviderId || null, autoCaptcha: s.autoCaptcha !== false, use2captcha: !!s.use2captcha, captchaKey: s.captchaKey || '', historyLimit: s.historyLimit == null ? 20 : s.historyLimit, lang: s.lang || null };
 }
 
 // ---------------- tabs / scope ----------------
@@ -99,29 +114,29 @@ async function cs(tabId, action, args = {}) {
 }
 const waitLoad = (tabId, timeout = 15000) => new Promise((res) => { const t0 = Date.now(); const iv = setInterval(async () => { const t = await chrome.tabs.get(tabId).catch(() => null); if (!t || t.status === 'complete' || Date.now() - t0 > timeout) { clearInterval(iv); setTimeout(res, 300); } }, 200); });
 
-// ---------------- debugger (trusted input) ----------------
-const attached = new Set();
-async function dbg(tabId, method, params = {}) {
-  if (!attached.has(tabId)) { await chrome.debugger.attach({ tabId }, '1.3'); attached.add(tabId); }
-  return chrome.debugger.sendCommand({ tabId }, method, params);
-}
-chrome.debugger.onDetach.addListener((src) => attached.delete(src.tabId));
-async function detachAll() { for (const id of [...attached]) { try { await chrome.debugger.detach({ tabId: id }); } catch {} attached.delete(id); } }
+// ---------------- debugger (trusted input) — CDP layer lives in cdp.js ----------------
+// Dialog text (alert/confirm/prompt auto-accepted) is surfaced to the model via get_console.
+setDialogLogger((tabId, text) => push(consoleLogs, tabId, { level: 'info', text }));
 
-async function trustedClick(tabId, x, y, opts = {}) {
-  const button = opts.button === 'right' ? 'right' : 'left'; const clickCount = opts.dbl ? 2 : 1;
-  await dbg(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-  for (let i = 1; i <= clickCount; i++) {
-    await dbg(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, clickCount: i });
-    await dbg(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount: i });
-  }
+// Coordinate frame per tab: model coordinates are pixels of the last screenshot; map them to viewport CSS px.
+const coordFrames = new Map(); // tabId -> { viewportWidth, viewportHeight, screenshotWidth, screenshotHeight }
+function setFrame(tabId, f) { if (f && f.viewportWidth && f.viewportHeight && f.screenshotWidth && f.screenshotHeight) coordFrames.set(tabId, f); }
+function mapCoords(tabId, x, y) {
+  const f = coordFrames.get(tabId);
+  if (!f) return { viewport: [x, y] }; // no screenshot yet — treat as CSS px
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= f.screenshotWidth + 2 || y >= f.screenshotHeight + 2)
+    return { oobError: `Coordinate (${Math.round(x)}, ${Math.round(y)}) is outside the screenshot frame (${f.screenshotWidth}x${f.screenshotHeight}). Coordinates are pixels of the last screenshot; if the page or window changed, take a new screenshot first.` };
+  return { viewport: [Math.round(x * f.viewportWidth / f.screenshotWidth), Math.round(y * f.viewportHeight / f.screenshotHeight)] };
 }
-const KEYS = { Enter: { code: 'Enter', key: 'Enter', keyCode: 13, text: '\r' }, Tab: { code: 'Tab', key: 'Tab', keyCode: 9 }, Escape: { code: 'Escape', key: 'Escape', keyCode: 27 }, Backspace: { code: 'Backspace', key: 'Backspace', keyCode: 8 }, Delete: { code: 'Delete', key: 'Delete', keyCode: 46 }, ArrowUp: { code: 'ArrowUp', key: 'ArrowUp', keyCode: 38 }, ArrowDown: { code: 'ArrowDown', key: 'ArrowDown', keyCode: 40 }, ArrowLeft: { code: 'ArrowLeft', key: 'ArrowLeft', keyCode: 37 }, ArrowRight: { code: 'ArrowRight', key: 'ArrowRight', keyCode: 39 }, Home: { code: 'Home', key: 'Home', keyCode: 36 }, End: { code: 'End', key: 'End', keyCode: 35 }, PageUp: { code: 'PageUp', key: 'PageUp', keyCode: 33 }, PageDown: { code: 'PageDown', key: 'PageDown', keyCode: 34 }, Space: { code: 'Space', key: ' ', keyCode: 32, text: ' ' } };
-async function trustedKey(tabId, key, modifiers = '') {
-  let mods = 0; if (/alt/i.test(modifiers)) mods |= 1; if (/ctrl/i.test(modifiers)) mods |= 2; if (/meta|cmd/i.test(modifiers)) mods |= 4; if (/shift/i.test(modifiers)) mods |= 8;
-  const k = KEYS[key] || (key.length === 1 ? { code: 'Key' + key.toUpperCase(), key, keyCode: key.toUpperCase().charCodeAt(0), text: key } : { code: key, key, keyCode: 0 });
-  await dbg(tabId, 'Input.dispatchKeyEvent', { type: k.text && !mods ? 'keyDown' : 'rawKeyDown', modifiers: mods, ...k, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode });
-  await dbg(tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', modifiers: mods, ...k, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode });
+chrome.webNavigation.onCommitted.addListener((d) => { if (d.frameId === 0) coordFrames.delete(d.tabId); });
+chrome.tabs.onRemoved.addListener((id) => { coordFrames.delete(id); detach(id).catch(() => {}); });
+
+// Hide the virtual cursor / pulse before a capture or click so it doesn't appear in the screenshot or block elementFromPoint.
+async function withOverlayHidden(tabId, fn) {
+  try { await cs(tabId, 'overlay_hide'); } catch {}
+  await new Promise((r) => setTimeout(r, 50));
+  try { return await fn(); }
+  finally { try { await cs(tabId, 'overlay_show'); } catch {} }
 }
 
 // ---------------- tool implementations ----------------
@@ -135,28 +150,54 @@ async function withSnapshot(tabId, text, wait = 600) {
 const toolImpl = {
   async list_tabs(_, ctx) { const tabs = await scopeTabs(ctx.settings); return tabs.map(fmtTab).join('\n') || 'No tabs'; },
   async switch_tab({ tab_id }, ctx) { await assertInScope(tab_id, ctx.settings); agentTabId = tab_id; await chrome.tabs.update(tab_id, { active: true }); const t = await chrome.tabs.get(tab_id); return 'Now working with ' + fmtTab(t); },
-  async new_tab({ url }, ctx) { const anchor = await currentTab(ctx.settings); const t = await chrome.tabs.create({ url: url || 'about:blank', windowId: anchor.windowId, index: anchor.index + 1 }); if (anchor.groupId && anchor.groupId !== -1) await chrome.tabs.group({ tabIds: t.id, groupId: anchor.groupId }); agentTabId = t.id; await waitLoad(t.id); const t2 = await chrome.tabs.get(t.id); return withSnapshot(t.id, 'Opened ' + fmtTab(t2)); },
+  async new_tab({ url }, ctx) { const anchor = await currentTab(ctx.settings); const t = await chrome.tabs.create({ url: url || 'about:blank', windowId: anchor.windowId, index: anchor.index + 1 }); if (anchor.groupId && anchor.groupId !== -1) await chrome.tabs.group({ tabIds: t.id, groupId: anchor.groupId }); agentTabId = t.id; await waitLoad(t.id); const t2 = await chrome.tabs.get(t.id); return ctx.inBatch ? 'Opened ' + fmtTab(t2) : withSnapshot(t.id, 'Opened ' + fmtTab(t2)); },
   async close_tab({ tab_id }, ctx) { await assertInScope(tab_id, ctx.settings); await chrome.tabs.remove(tab_id); if (agentTabId === tab_id) agentTabId = null; return 'Closed tab ' + tab_id; },
-  async navigate({ url }, ctx) { const t = await currentTab(ctx.settings); if (url === 'back') await chrome.tabs.goBack(t.id); else if (url === 'forward') await chrome.tabs.goForward(t.id); else if (url === 'reload') await chrome.tabs.reload(t.id); else await chrome.tabs.update(t.id, { url: /^[a-z]+:\/\//i.test(url) ? url : 'https://' + url }); await waitLoad(t.id); const t2 = await chrome.tabs.get(t.id); return withSnapshot(t.id, 'Now at ' + fmtTab(t2)); },
+  async navigate({ url }, ctx) { const t = await currentTab(ctx.settings); if (url === 'back') await chrome.tabs.goBack(t.id); else if (url === 'forward') await chrome.tabs.goForward(t.id); else if (url === 'reload') await chrome.tabs.reload(t.id); else await chrome.tabs.update(t.id, { url: /^[a-z]+:\/\//i.test(url) ? url : 'https://' + url }); await waitLoad(t.id); const t2 = await chrome.tabs.get(t.id); return ctx.inBatch ? 'Now at ' + fmtTab(t2) : withSnapshot(t.id, 'Now at ' + fmtTab(t2)); },
   async read_page(a, ctx) { const t = await currentTab(ctx.settings); a.maxChars = Math.min(Math.max(a.maxChars || 12000, 4000), 14000); const r = await cs(t.id, 'read_page', a); return `URL: ${r.url}\nTitle: ${r.title}\nScroll: ${r.scroll.y}/${r.scroll.maxY}\n\n${r.tree || '(nothing visible)'}`; },
   async get_page_text(a, ctx) { const t = await currentTab(ctx.settings); const r = await cs(t.id, 'get_text', a); return `URL: ${r.url}\nTitle: ${r.title}\n\n${r.text}`; },
-  async find(a, ctx) { const t = await currentTab(ctx.settings); return cs(t.id, 'find', a); },
+  async find(a, ctx) {
+    const t = await currentTab(ctx.settings);
+    const helper = ctx.settings.providers.find((p) => p.id === ctx.settings.helperProviderId);
+    if (!helper) return cs(t.id, 'find', a); // no helper model configured → substring fallback
+    const page = await cs(t.id, 'read_page', { filter: 'all', maxChars: 14000 });
+    const tree = page.tree || '';
+    const prompt = `You are helping find elements on a web page. The user wants to find: "${a.query}"\n\nHere is the accessibility tree of the page:\n${tree}\n\nFind ALL elements that match the query. Return up to 20 most relevant matches, ordered by relevance, in this EXACT format (one line per element):\n\nFOUND: <total_number>\nSHOWING: <number_shown>\n---\nref_X | role | name | type | reason it matches\n\nIf more than 20 matches, add a final line: MORE: refine your query. If none match, return only:\nFOUND: 0\nERROR: why nothing matched`;
+    let text = '';
+    try { const r = await callModel({ ...helper, maxTokens: Math.min(helper.maxTokens || 800, 800), temperature: 0 }, [{ role: 'user', content: prompt }], null, undefined, () => {}); text = r.content || ''; }
+    catch { return cs(t.id, 'find', a); }
+    const valid = new Set(tree.match(/ref_\d+/g) || []);
+    const hits = [];
+    for (const line of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      if (!line.startsWith('ref_') || !line.includes('|')) continue;
+      const p = line.split('|').map((s) => s.trim());
+      if (valid.has(p[0])) hits.push({ ref: p[0], role: p[1], name: p[2], type: p[3], reason: p[4] });
+    }
+    if (!hits.length) return cs(t.id, 'find', a); // helper produced nothing usable → substring fallback
+    const rects = await cs(t.id, 'rects', { refs: hits.map((h) => h.ref) }).catch(() => []);
+    const rc = new Map((rects || []).map((r) => [r.ref, r]));
+    return hits.map((h) => { const c = rc.get(h.ref); return `[${h.ref}] ${h.role || ''} "${h.name || ''}"${c && c.x != null ? ` at (${c.x},${c.y})` : ''}${h.reason ? ' — ' + h.reason : ''}`; }).join('\n');
+  },
   async click(a, ctx) {
     const t = await currentTab(ctx.settings);
+    if (!a.ref && typeof a.x === 'number' && typeof a.y === 'number') { const mc = mapCoords(t.id, a.x, a.y); if (mc.oobError) throw new Error(mc.oobError); a = { ...a, x: mc.viewport[0], y: mc.viewport[1] }; }
     let result;
     if (ctx.settings.useDebugger) { try { const p = await cs(t.id, 'prepare_click', a); await trustedClick(t.id, p.x, p.y, a); result = `Clicked ${p.tag?.toLowerCase() || 'point'} "${(p.label || '').slice(0, 60)}" at (${Math.round(p.x)},${Math.round(p.y)})`; } catch (e) { if (/Cannot access|Unknown or stale|Provide ref/.test(e.message)) throw e; } }
     if (result == null) result = await cs(t.id, 'synthetic_click', a);
     await waitLoad(t.id, 4000);
-    return withSnapshot(t.id, result);
+    return ctx.inBatch ? result : withSnapshot(t.id, result);
   },
-  async hover(a, ctx) { const t = await currentTab(ctx.settings); const r = await cs(t.id, 'hover', a); if (ctx.settings.useDebugger) { try { const p = await cs(t.id, 'prepare_click', a); await dbg(t.id, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); } catch {} } return r; },
+  async hover(a, ctx) {
+    const t = await currentTab(ctx.settings);
+    if (!a.ref && typeof a.x === 'number' && typeof a.y === 'number') { const mc = mapCoords(t.id, a.x, a.y); if (mc.oobError) throw new Error(mc.oobError); a = { ...a, x: mc.viewport[0], y: mc.viewport[1] }; }
+    const r = await cs(t.id, 'hover', a); if (ctx.settings.useDebugger) { try { const p = await cs(t.id, 'prepare_click', a); await dbg(t.id, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); } catch {} } return r;
+  },
   async type({ text, ref, append, press_enter }, ctx) {
     const t = await currentTab(ctx.settings);
     let out;
     if (ctx.settings.useDebugger) {
       try { const f = await cs(t.id, 'focus', { ref }); if (ref) { await trustedClick(t.id, f.x, f.y); await new Promise((r) => setTimeout(r, 150)); }
-        if (!append) { await trustedKey(t.id, 'a', 'ctrl'); await trustedKey(t.id, 'a', 'meta'); await trustedKey(t.id, 'Backspace'); }
-        await dbg(t.id, 'Input.insertText', { text }); out = 'Typed (trusted)'; }
+        if (!append) await clearField(t.id);
+        await typeText(t.id, text); out = 'Typed (trusted)'; }
       catch (e) { out = await cs(t.id, 'type_text', { text, ref, append }); }
     } else out = await cs(t.id, 'type_text', { text, ref, append });
     if (press_enter) { await toolImpl.press_key({ key: 'Enter' }, ctx); out += ' + Enter'; await waitLoad(t.id, 5000); }
@@ -164,7 +205,27 @@ const toolImpl = {
   },
   async press_key({ key, modifiers }, ctx) { const t = await currentTab(ctx.settings); if (ctx.settings.useDebugger) { try { await trustedKey(t.id, key, modifiers); await new Promise((r) => setTimeout(r, 300)); return 'Pressed ' + (modifiers ? modifiers + '+' : '') + key; } catch {} } return cs(t.id, 'key_synthetic', { key, modifiers }); },
   async select_option(a, ctx) { const t = await currentTab(ctx.settings); return cs(t.id, 'select_option', a); },
-  async scroll(a, ctx) { const t = await currentTab(ctx.settings); return cs(t.id, 'scroll', a); },
+  async scroll(a, ctx) {
+    const t = await currentTab(ctx.settings);
+    if (a.to === 'top' || a.to === 'bottom' || a.ref) return cs(t.id, 'scroll', a); // jumps & ref-scroll stay in content
+    let x, y;
+    if (typeof a.x === 'number' && typeof a.y === 'number') { const mc = mapCoords(t.id, a.x, a.y); if (mc.oobError) throw new Error(mc.oobError); [x, y] = mc.viewport; }
+    else { const vp = await cs(t.id, 'viewport').catch(() => ({ width: 800, height: 600 })); x = Math.round(vp.width / 2); y = Math.round(vp.height / 2); }
+    const ticks = Math.max(1, Math.min(10, a.amount ? Math.round(a.amount / 100) : 3)), px = ticks * 100;
+    let dx = 0, dy = 0;
+    if (a.direction === 'up') dy = -px; else if (a.direction === 'left') dx = -px; else if (a.direction === 'right') dx = px; else dy = px;
+    const before = await cs(t.id, 'scroll_probe', { x, y }).catch(() => ({ top: 0, left: 0 }));
+    let ok = false;
+    if (ctx.settings.useDebugger) {
+      try { await dbg(t.id, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: dx, deltaY: dy }); await new Promise((r) => setTimeout(r, 200));
+        const after = await cs(t.id, 'scroll_probe', { x, y }).catch(() => before);
+        ok = Math.abs((after.top || 0) - (before.top || 0)) > 5 || Math.abs((after.left || 0) - (before.left || 0)) > 5;
+      } catch {}
+    }
+    if (!ok) { await cs(t.id, 'scroll_fallback', { x, y, dx, dy }); await new Promise((r) => setTimeout(r, 200)); }
+    const msg = `Scrolled ${a.direction || 'down'} by ${ticks} ticks at (${x},${y})`;
+    return ctx.inBatch ? msg : withSnapshot(t.id, msg);
+  },
   async scroll_to(a, ctx) { const t = await currentTab(ctx.settings); return cs(t.id, 'scroll_to', a); },
   async wait({ seconds }) { await new Promise((r) => setTimeout(r, Math.min(30, seconds || 1) * 1000)); return 'Waited ' + seconds + 's'; },
   async pause_for_human({ reason }, ctx) {
@@ -172,11 +233,28 @@ const toolImpl = {
     return t('bg.humanDone', note);
   },
   async screenshot(_, ctx) {
-    const t = await currentTab(ctx.settings); await chrome.tabs.update(t.id, { active: true }); await new Promise((r) => setTimeout(r, 250));
-    const dataUrl = await chrome.tabs.captureVisibleTab(t.windowId, { format: 'jpeg', quality: 70 });
-    const vp = await cs(t.id, 'viewport').catch(() => null);
-    ctx.pendingImage = dataUrl; ctx.emit({ type: 'image', dataUrl });
-    return `Screenshot captured${vp ? ` (viewport ${vp.width}x${vp.height}, CSS px; use these coords for click x,y)` : ''}. ${ctx.provider.vision ? 'The image is attached in the next message.' : 'NOTE: current model is not marked as vision-capable, so the image is only shown to the user. Use read_page instead.'}`;
+    const t = await currentTab(ctx.settings);
+    const vp = await cs(t.id, 'viewport').catch(() => ({ width: 1280, height: 800, dpr: 1, scrollX: 0, scrollY: 0 }));
+    const dpr = vp.dpr || 1, physW = Math.round(vp.width * dpr), physH = Math.round(vp.height * dpr);
+    const budget = { pxPerToken: IMG_BUDGET.pxPerToken, maxTargetPx: ctx.provider.imgMaxPx || IMG_BUDGET.maxTargetPx, maxTargetTokens: ctx.provider.imgMaxTokens || IMG_BUDGET.maxTargetTokens };
+    const [targetW] = fitToBudget(physW, physH, budget);
+    const scale = Math.min(1, targetW / physW);
+    const outW = Math.max(1, Math.round(physW * scale)), outH = Math.max(1, Math.round(physH * scale));
+    let base64;
+    try {
+      const r = await withOverlayHidden(t.id, () => dbg(t.id, 'Page.captureScreenshot', { format: 'jpeg', quality: 75, fromSurface: true, captureBeyondViewport: false, clip: { x: vp.scrollX || 0, y: vp.scrollY || 0, width: vp.width, height: vp.height, scale } }));
+      base64 = r.data;
+      if (base64 && base64.length > 1398100) { const fb = await cs(t.id, 'downscale_jpeg', { base64, maxChars: 1398100 }).catch(() => null); if (fb?.base64) base64 = fb.base64; }
+    } catch (e) {
+      // fallback: legacy visible-tab capture (needs the tab active)
+      await chrome.tabs.update(t.id, { active: true }); await new Promise((r) => setTimeout(r, 200));
+      base64 = (await chrome.tabs.captureVisibleTab(t.windowId, { format: 'jpeg', quality: 70 })).split(',')[1];
+    }
+    const dataUrl = 'data:image/jpeg;base64,' + base64;
+    setFrame(t.id, { viewportWidth: vp.width, viewportHeight: vp.height, screenshotWidth: outW, screenshotHeight: outH });
+    if (ctx.inBatch) (ctx.pendingImages || (ctx.pendingImages = [])).push(dataUrl); else ctx.pendingImage = dataUrl;
+    ctx.emit({ type: 'image', dataUrl });
+    return `Screenshot ${outW}x${outH} px (viewport ${vp.width}x${vp.height} CSS px). Click coordinates are in screenshot pixels.${ctx.provider.vision ? ' The image is attached in the next message.' : ' NOTE: current model is not vision-capable — the image is only shown to the user; use read_page instead.'}`;
   },
   async get_network_requests({ filter, limit = 40, include_bodies = false, tab_id }, ctx) {
     const t = tab_id ? await chrome.tabs.get(tab_id) : await currentTab(ctx.settings); if (tab_id) await assertInScope(tab_id, ctx.settings);
@@ -195,6 +273,28 @@ const toolImpl = {
     const v = r.result?.value; const s = typeof v === 'string' ? v : JSON.stringify(v); return s == null ? 'undefined' : s.length > 20000 ? s.slice(0, 20000) + '…[truncated]' : s;
   },
   async clear_logs(_, ctx) { const t = await currentTab(ctx.settings); netLogs.delete(t.id); consoleLogs.delete(t.id); return 'Cleared'; },
+  async batch({ actions }, ctx) {
+    if (!Array.isArray(actions) || !actions.length) throw new Error('batch: "actions" must be a non-empty array of {name, args}.');
+    ctx.pendingImages = ctx.pendingImages || []; // shared array so screenshots taken inside the batch reach the agent loop
+    const n = actions.length, out = [];
+    const join = () => out.map((r, j) => `[${j + 1}/${n}] ${r}`).join('\n');
+    for (let i = 0; i < n; i++) {
+      const step = actions[i] || {}, name = step.name, args = step.args || {};
+      const label = `${name}(${JSON.stringify(args).slice(0, 80)})`;
+      if (!name || typeof name !== 'string' || !toolImpl[name] || ['batch', 'done', 'pause_for_human'].includes(name))
+        return join() + `\n[${i + 1}/${n}] ${label}: ERROR: "${name}" is not allowed inside batch (batch stopped).`;
+      try {
+        let res = await toolImpl[name]({ ...args }, { ...ctx, inBatch: true });
+        if (typeof res !== 'string') res = JSON.stringify(res);
+        out.push(`${label}: ${res.length > 1500 ? res.slice(0, 1500) + '…' : res}`);
+      } catch (e) {
+        out.push(`${label}: ERROR: ${e.message || String(e)}`);
+        return join() + `\n(batch stopped at step ${i + 1}/${n} due to the error above)`;
+      }
+      try { await waitLoad((await currentTab(ctx.settings)).id, 3000); } catch {}
+    }
+    return join();
+  },
   async done({ summary }) { return summary; },
 };
 
@@ -482,7 +582,7 @@ async function loadStore() { try { const s = await chrome.storage.local.get('oa_
 async function saveStore(obj) { try { await chrome.storage.local.set({ oa_sessions: obj }); } catch {} }
 function sessTitle(sess) { const u = (sess.transcript || []).find((e) => e.t === 'user'); return sess.title || (u && u.text ? String(u.text).replace(/\s+/g, ' ').trim().slice(0, 64) : t('bg.newChat')); }
 async function persistSession(sess) {
-  if (!sess || !sess.id) return;
+  if (!sess || !sess.id || sess.deleted) return; // a deleted session must never be re-saved (e.g. by a running loop's finally)
   if (!(sess.transcript || []).length) return; // don't store empty sessions
   const store = await loadStore();
   const prev = store[sess.id] || {};
@@ -513,6 +613,7 @@ async function loadSessionInto(id) {
 }
 
 async function runAgent(port, sessionId, userText, images) {
+  ensureOffscreen();
   const settings = await getSettings();
   const provider = settings.providers.find((p) => p.id === settings.activeProvider) || settings.providers[0];
   if (!provider) { postPanel({ type: 'error', text: t('bg.noProvider') }); return; }
@@ -657,7 +758,9 @@ async function runAgent(port, sessionId, userText, images) {
           emit({ type: 'role', role: 'supervisor', text: `{"status":"continue","note":${JSON.stringify(t('bg.captchaAutoErr2', e.message))}}` });
         }
       }
-      if (ctx.pendingImage && provider.vision) { sess.messages.push({ role: 'user', content: [{ type: 'text', text: '[screenshot of the current viewport]' }, { type: 'image_url', image_url: { url: ctx.pendingImage } }] }); ctx.pendingImage = null; }
+      const shot = ctx.pendingImage || (ctx.pendingImages?.length ? ctx.pendingImages[ctx.pendingImages.length - 1] : null); // batch keeps only the last screenshot
+      if (shot && provider.vision) sess.messages.push({ role: 'user', content: [{ type: 'text', text: '[screenshot of the current viewport]' }, { type: 'image_url', image_url: { url: shot } }] });
+      ctx.pendingImage = null; ctx.pendingImages = null;
       // ---- anti-loop: same action(s) AND same result repeated with no progress (model-agnostic) ----
       const sig = toolCalls.map((t) => t.function.name + t.function.arguments).join('|') + '||' + roundResults.join('~');
       const repeated = sig && sig === lastSig; lastSig = sig;
@@ -702,18 +805,21 @@ chrome.runtime.onConnect.addListener((port) => {
       const a = await getAnchorTab(); if (a) await bindPanelToTab(a); // panel opened → bind to the tab it was summoned on
       port.postMessage({ type: 'bound' });
       if (!activeSessionId) { try { const s = await chrome.storage.session.get('activeSessionId'); activeSessionId = s.activeSessionId || null; } catch {} }
-      if (activeSessionId) { await loadSessionInto(activeSessionId); port.postMessage(restorePayload(activeSessionId)); } // rebuild ongoing/last task
+      // Resume ONLY a task that is still running; a finished chat must not silently re-attach to a fresh panel
+      // (that leaked one chat's history into the next). Old chats are reopened explicitly from the history menu.
+      const live = activeSessionId ? sessions.get(activeSessionId) : null;
+      if (live && live.abort) { await loadSessionInto(activeSessionId); port.postMessage(restorePayload(activeSessionId)); }
     }
     else if (msg.type === 'send') { panelPort = port; runAgent(port, msg.sessionId, msg.text, msg.images); }
     else if (msg.type === 'stop') { const s = sessions.get(msg.sessionId) || sessions.get(activeSessionId); s?.abort?.abort(); }
-    else if (msg.type === 'reset') { const s = sessions.get(msg.sessionId); if (s) await persistSession(s); sessions.delete(msg.sessionId); if (activeSessionId === msg.sessionId) { activeSessionId = null; try { chrome.storage.session.remove('activeSessionId'); } catch {} } agentTabId = null; await detachAll(); const a = await getAnchorTab(); if (a) await bindPanelToTab(a); port.postMessage({ type: 'reset_ok' }); }
+    else if (msg.type === 'reset') { for (const id of new Set([msg.sessionId, activeSessionId].filter(Boolean))) { const s = sessions.get(id); if (s) { s.abort?.abort(); await persistSession(s); sessions.delete(id); } } activeSessionId = null; try { chrome.storage.session.remove('activeSessionId'); } catch {} agentTabId = null; await detachAll(); const a = await getAnchorTab(); if (a) await bindPanelToTab(a); port.postMessage({ type: 'reset_ok' }); }
     else if (msg.type === 'set_agent_tab') { agentTabId = msg.tabId; }
     else if (msg.type === 'resume') { if (activeSessionId) { await loadSessionInto(activeSessionId); port.postMessage(restorePayload(activeSessionId)); } }
     else if (msg.type === 'sessions_list') { port.postMessage({ type: 'sessions', items: await sessionsList() }); }
     else if (msg.type === 'session_load') { const sess = await loadSessionInto(msg.id); if (sess) { activeSessionId = msg.id; try { chrome.storage.session.set({ activeSessionId }); } catch {} port.postMessage(restorePayload(msg.id)); } }
     else if (msg.type === 'session_pin') { const store = await loadStore(); if (store[msg.id]) { store[msg.id].pinned = !store[msg.id].pinned; const live = sessions.get(msg.id); if (live) live.pinned = store[msg.id].pinned; await saveStore(store); } port.postMessage({ type: 'sessions', items: await sessionsList() }); }
     else if (msg.type === 'session_delete') { const store = await loadStore(); delete store[msg.id]; await saveStore(store); sessions.delete(msg.id); port.postMessage({ type: 'sessions', items: await sessionsList() }); }
-    else if (msg.type === 'session_delete_current') { const id = msg.sessionId || activeSessionId; if (id) { const s = sessions.get(id); s?.abort?.abort(); const store = await loadStore(); delete store[id]; await saveStore(store); sessions.delete(id); if (activeSessionId === id) { activeSessionId = null; try { chrome.storage.session.remove('activeSessionId'); } catch {} } } port.postMessage({ type: 'reset_ok' }); }
+    else if (msg.type === 'session_delete_current') { const targets = new Set([msg.sessionId, activeSessionId].filter(Boolean)); if (targets.size) { const store = await loadStore(); for (const id of targets) { const s = sessions.get(id); if (s) { s.deleted = true; s.abort?.abort(); } delete store[id]; sessions.delete(id); } await saveStore(store); } activeSessionId = null; try { chrome.storage.session.remove('activeSessionId'); } catch {} port.postMessage({ type: 'reset_ok' }); }
     else if (msg.type === 'human_continue') { const s = sessions.get(msg.sessionId) || sessions.get(activeSessionId); if (s && s.pendingHuman) { s.pendingHuman.resolve(msg.note || ''); s.pendingHuman = null; } }
     else if (msg.type === 'human_cancel') { const s = sessions.get(msg.sessionId) || sessions.get(activeSessionId); if (s && s.pendingHuman) { s.pendingHuman.reject(new Error(t('bg.humanCancel'))); s.pendingHuman = null; } s?.abort?.abort(); }
     else if (msg.type === 'ping') { /* keepalive: receiving a port message resets the service-worker idle timer while paused */ }
@@ -738,5 +844,6 @@ async function handlePanel(msg, sendResponse) {
     else sendResponse({ ok: false, error: 'unknown action' });
   } catch (e) { sendResponse({ ok: false, error: e.message || String(e) }); }
 }
+
 
 
